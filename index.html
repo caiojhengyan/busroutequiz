@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公車路線挑戰</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f6f4ee;--card:#fff;--ink:#1f2933;--sub:#6b7785;--pri:#d9480f;--pri2:#b43a0a;--ok:#2b8a3e;--line:#e3ded2}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+.screen{display:none;min-height:100%;padding:20px;max-width:720px;margin:0 auto}
+.screen.on{display:block}
+h1{font-size:30px;margin:8vh 0 6px;text-align:center}
+.tag{text-align:center;color:var(--sub);margin-bottom:36px}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:12px 18px;background:var(--pri);color:#fff;font-weight:600}
+button:hover{background:var(--pri2)}
+button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+button.ghost:hover{background:#f0ede4}
+button:disabled{opacity:.5;cursor:default}
+.big{display:block;width:100%;padding:20px;font-size:20px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top h2{margin:0;font-size:20px;flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:8px 14px;font-weight:500;user-select:none}
+.chip.sel{background:var(--pri);color:#fff;border-color:var(--pri)}
+.hint{color:var(--sub);font-size:13px;margin:6px 0}
+label.row{display:flex;gap:8px;align-items:center;margin:10px 0}
+input[type=text],input[type=password]{font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;width:100%}
+#quiz{padding:0;max-width:none;position:relative}
+#quiz.on{display:flex;flex-direction:column;height:100vh;height:100dvh}
+.qbar{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.qbar .timer{font-variant-numeric:tabular-nums;font-weight:700;font-size:18px;margin-right:auto}
+#map{flex:1;background:#faf8f2}
+.qinput{display:flex;gap:8px;padding:10px 12px;background:#fff;border-top:1px solid var(--line)}
+.qinput input{flex:1}
+.msg{padding:0 12px 8px;background:#fff;min-height:22px;font-size:14px;color:var(--pri)}
+.shake{animation:sh .3s}
+@keyframes sh{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:2000;padding:20px}
+.modal.on{display:flex}
+.modal .box{background:#fff;border-radius:16px;padding:24px;max-width:380px;width:100%;text-align:center}
+.modal .rn{font-size:36px;font-weight:800;color:var(--ok);margin:4px 0}
+.modal .stat{margin:6px 0;color:var(--sub)}
+.modal .btns{display:flex;gap:10px;margin-top:18px}
+.modal .btns button{flex:1}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.b-no{background:#e6f4ea;color:var(--ok)}.b-yes{background:#fff0e6;color:var(--pri)}
+.rec{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:12px;border-bottom:1px solid var(--line)}
+.rec:last-child{border-bottom:0}
+.rec .nm{font-weight:700;font-size:17px}
+.rec .rg{color:var(--sub);font-size:13px;margin-left:6px;font-weight:400}
+.rec .meta{grid-column:1/3;display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--sub);justify-content:flex-end}
+.empty{text-align:center;color:var(--sub);padding:30px}
+#status{color:var(--sub);font-size:14px;min-height:20px;margin:8px 0}
+.leaflet-container{background:#faf8f2}
+</style>
+</head>
+<body>
+
+<!-- 首頁 -->
+<section id="home" class="screen on">
+  <h1>🚌 公車路線挑戰</h1>
+  <div class="tag">看路線軌跡,猜出路線編號</div>
+  <button class="big" id="goStart">開始挑戰</button>
+  <button class="big ghost" id="goStats">查詢戰績</button>
+  <button class="ghost" id="goData" style="width:100%">資料與設定 (TDX)</button>
+</section>
+
+<!-- 挑戰設定 -->
+<section id="setup" class="screen">
+  <div class="top"><button class="ghost" data-back>← 返回</button><h2>挑戰設定</h2></div>
+  <div class="card">
+    <b>選擇地區(可多選)</b>
+    <div class="chips" id="regionChips" style="margin-top:10px"></div>
+  </div>
+  <div class="card" id="icBox" style="display:none">
+    <b>公路客運號碼範圍</b>
+    <div class="hint">每 100 號一組(例如 10XX = 1000–1099、67XX = 6700–6799)。可多選;選「全部」代表不限。</div>
+    <div class="chips" id="icChips" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <label class="row"><input type="checkbox" id="allowRepeat"> 是否允許重複挑戰已出過的題目</label>
+    <div class="hint">未勾選時,已出過的題目不會再出現(可在「資料與設定」清除出題紀錄)。</div>
+  </div>
+  <div id="status"></div>
+  <button class="big" id="doStart">出題!</button>
+</section>
+
+<!-- 作答 -->
+<section id="quiz" class="screen">
+  <div class="qbar">
+    <span class="timer" id="timer">00:00</span>
+    <button class="ghost" id="mapToggle">底圖:關</button>
+    <button class="ghost" id="revealBtn">顯示答案</button>
+    <button class="ghost" id="quitBtn">離開</button>
+  </div>
+  <div id="map"></div>
+  <div class="msg" id="qmsg"></div>
+  <form class="qinput" id="qform" autocomplete="off">
+    <input type="text" id="ans" placeholder="輸入路線編號,例如 F812、6715A" autocapitalize="characters" enterkeyhint="send">
+    <button type="submit" id="sendBtn">送出</button>
+  </form>
+</section>
+
+<!-- 戰績 -->
+<section id="stats" class="screen">
+  <div class="top"><button class="ghost" data-back>← 返回</button><h2>戰績</h2></div>
+  <div class="card">
+    <div class="hint" style="margin-top:0">選擇縣市範圍(可多選;選「全部」代表不限)</div>
+    <div class="chips" id="statChips"></div>
+    <button id="retestRange" style="margin-top:12px;width:100%">從已出過的題目重新測驗</button>
+  </div>
+  <div class="card" id="recList" style="padding:0"></div>
+</section>
+
+<!-- 資料與設定 -->
+<section id="data" class="screen">
+  <div class="top"><button class="ghost" data-back>← 返回</button><h2>資料與設定</h2></div>
+  <div class="card">
+    <b>TDX 金鑰</b>
+    <div class="hint">至 tdx.transportdata.tw 註冊取得 Client ID / Secret。僅儲存在此瀏覽器的 localStorage。</div>
+    <input type="text" id="cid" placeholder="Client ID" style="margin-bottom:8px">
+    <input type="password" id="csec" placeholder="Client Secret">
+    <button style="margin-top:10px" id="saveKey">儲存金鑰</button>
+  </div>
+  <div class="card">
+    <b>路線資料快取</b>
+    <div class="hint">開始挑戰時會自動由 TDX 下載所選地區並快取於瀏覽器。若瀏覽器直連 TDX 失敗,請用 fetch_tdx.py 產生 routes.json 後在此匯入。</div>
+    <div id="cacheList"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="ghost" id="importBtn">匯入 routes.json</button>
+      <button class="ghost" id="clearCache">清除全部快取</button>
+    </div>
+    <input type="file" id="importFile" accept=".json" hidden>
+  </div>
+  <div class="card">
+    <b>出題與答題紀錄</b>
+    <div class="hint" id="askedInfo"></div>
+    <button class="ghost" id="clearAsked">清除紀錄(出題與戰績)</button>
+  </div>
+  <div id="dataMsg" class="hint"></div>
+</section>
+
+<!-- 結算 -->
+<div class="modal" id="result">
+  <div class="box">
+    <div>🎉 答對了!</div>
+    <div class="rn" id="rName"></div>
+    <div class="stat" id="rRegion"></div>
+    <div class="stat">花費時間:<b id="rTime"></b></div>
+    <div class="stat">底圖:<span id="rMap" class="badge"></span></div>
+    <div class="btns">
+      <button id="again">再來一題</button>
+      <button class="ghost" id="toHome">返回主頁</button>
+    </div>
+  </div>
+</div>
+
+<!-- 縣市完成 -->
+<div class="modal" id="congrats">
+  <div class="box">
+    <div style="font-size:40px">🏆</div>
+    <div id="cgTitle">恭喜你已完成</div>
+    <div class="rn" id="cgNames"></div>
+    <div class="stat" id="cgNote">該地區的出題紀錄已重置,可重新挑戰。<br>戰績仍會保留。</div>
+    <div class="btns"><button id="cgOk">返回主頁</button></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ============ 常數 ============ */
+const REGIONS=[
+ ['Taipei','臺北市'],['NewTaipei','新北市'],['Taoyuan','桃園市'],['Taichung','臺中市'],['Tainan','臺南市'],['Kaohsiung','高雄市'],
+ ['Keelung','基隆市'],['Hsinchu','新竹市'],['HsinchuCounty','新竹縣'],['MiaoliCounty','苗栗縣'],['ChanghuaCounty','彰化縣'],
+ ['NantouCounty','南投縣'],['YunlinCounty','雲林縣'],['Chiayi','嘉義市'],['ChiayiCounty','嘉義縣'],['PingtungCounty','屏東縣'],
+ ['YilanCounty','宜蘭縣'],['HualienCounty','花蓮縣'],['TaitungCounty','臺東縣'],['PenghuCounty','澎湖縣'],['KinmenCounty','金門縣'],
+ ['LienchiangCounty','連江縣'],['InterCity','公路客運']
+];
+const RLABEL=Object.fromEntries(REGIONS);
+// 公路客運依路線號碼每 100 號分一組(取名稱中第一段數字):1001→10XX、6715A→67XX、F812→8XX
+function icGroup(name){const m=String(name).match(/\d+/);return m?Math.floor(parseInt(m[0],10)/100)+'XX':'其他'}
+const icSort=(a,b)=>{const x=parseInt(a),y=parseInt(b);return isNaN(x)?1:isNaN(y)?-1:x-y};
+// 縣市界(2010 年版縣市界,已簡化;每條為 [lat,lon] 折線)
+const COUNTY_ARCS=/*ARCS*/[];
+const TDX='https://tdx.transportdata.tw';
+const $=s=>document.querySelector(s);
+const LS={get:(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch{return d}},set:(k,v)=>localStorage.setItem(k,JSON.stringify(v))};
+
+/* ============ IndexedDB 快取 ============ */
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('busquiz',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function kvGet(k){const db=await idb();return new Promise(res=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>res(undefined)})}
+async function kvSet(k,v){const db=await idb();return new Promise((res,rej)=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+async function kvClear(){const db=await idb();return new Promise(res=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').clear();t.oncomplete=res})}
+
+/* ============ TDX 資料 ============ */
+let token=null,tokenExp=0;
+async function getToken(){
+  if(token&&Date.now()<tokenExp)return token;
+  const id=LS.get('cid',''),sec=LS.get('csec','');
+  if(!id||!sec)throw new Error('尚未設定 TDX 金鑰,請至「資料與設定」輸入,或匯入 routes.json');
+  const r=await fetch(TDX+'/auth/realms/TDXConnect/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:sec})});
+  if(!r.ok)throw new Error('取得 TDX token 失敗 ('+r.status+')');
+  const j=await r.json();token=j.access_token;tokenExp=Date.now()+(j.expires_in-60)*1000;return token;
+}
+async function tdxGet(path){
+  for(let i=0;i<4;i++){
+    const r=await fetch(TDX+path,{headers:{authorization:'Bearer '+await getToken()}});
+    if(r.status===429){await new Promise(s=>setTimeout(s,1500*(i+1)));continue}
+    if(r.status===401){token=null;continue}
+    if(!r.ok)throw new Error('TDX 請求失敗 ('+r.status+')');
+    return r.json();
+  }
+  throw new Error('TDX 請求失敗(重試後仍被限流)');
+}
+function parseWKT(w){
+  if(!w)return[];
+  const out=[];
+  for(const g of (w.match(/\(([^()]+)\)/g)||[])){
+    const pts=[];
+    for(const p of g.slice(1,-1).split(',')){
+      const [x,y]=p.trim().split(/\s+/).map(Number);
+      if(isFinite(x)&&isFinite(y))pts.push([+y.toFixed(5),+x.toFixed(5)]);
+    }
+    if(pts.length>1)out.push(pts);
+  }
+  return out;
+}
+function buildRoutes(shapes,region){
+  const m=new Map();
+  for(const s of shapes){
+    const nm=(s.SubRouteName&&s.SubRouteName.Zh_tw)||(s.RouteName&&s.RouteName.Zh_tw);
+    if(!nm)continue;
+    const key=s.SubRouteUID||s.RouteUID||nm;
+    let e=m.get(key);
+    if(!e){e={id:key,name:String(nm).trim(),routeName:String((s.RouteName&&s.RouteName.Zh_tw)||nm).trim(),region,lines:[]};m.set(key,e)}
+    e.lines.push(...parseWKT(s.Geometry));
+  }
+  return [...m.values()].filter(r=>r.lines.length);
+}
+async function loadRegion(code,onStatus){
+  const c=await kvGet('region:'+code);
+  if(c&&c.routes&&c.routes.length)return groupByName(c.routes,code);
+  onStatus&&onStatus('下載 '+RLABEL[code]+' 路線幾何…');
+  const path=code==='InterCity'?'/api/basic/v2/Bus/Shape/InterCity':'/api/basic/v2/Bus/Shape/City/'+code;
+  const shapes=await tdxGet(path+'?%24format=JSON&%24top=50000');
+  const routes=buildRoutes(shapes,code);
+  if(!routes.length)throw new Error(RLABEL[code]+' 沒有取得路線資料');
+  await kvSet('region:'+code,{routes,ts:Date.now()});
+  return groupByName(routes,code);
+}
+
+/* ============ 答案判定 ============ */
+function norm(s){
+  return String(s||'').replace(/[\uFF01-\uFF5E]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/\u3000/g,' ')
+    .replace(/[\s\-_–—]/g,'').toUpperCase();
+}
+function isCorrect(input,route){
+  const a=norm(input);
+  return !!a&&norm(route.name)===a; // 市區公車與公路客運一律需完全相符(忽略大小寫、全半形、空格、連字號)
+}
+// 同一地區內,路線名稱相同者合併為一題(TDX 常把同名路線拆成多個 SubRouteUID)
+function groupByName(routes,region){
+  const m=new Map();
+  for(const r of routes){
+    const k=norm(r.name);if(!k)continue;
+    let e=m.get(k);
+    if(!e){e={id:'N:'+k,name:r.name,routeName:r.routeName||r.name,region,lines:[]};m.set(k,e)}
+    e.lines.push(...r.lines);
+  }
+  return [...m.values()];
+}
+
+/* ============ 狀態 ============ */
+let pool={},cur=null,t0=0,tick=null,usedMap=false,map=null,lineLayer=null,revealed=false,icRoutes=null;
+let settings=Object.assign({regions:[],allowRepeat:false,icGroups:[]},LS.get('settings',{}));
+let statSel=new Set();
+const records=()=>LS.get('records',[]);
+const asked=()=>LS.get('asked',{});
+
+/* ============ 導覽 ============ */
+const stack=['home'];
+function show(id,push=true){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+  if(push&&stack[stack.length-1]!==id)stack.push(id);
+  if(id==='quiz'&&map)setTimeout(()=>map.invalidateSize(),50);
+}
+function back(){stack.pop();show(stack[stack.length-1]||'home',false)}
+document.querySelectorAll('[data-back]').forEach(b=>b.onclick=back);
+$('#goStart').onclick=()=>{renderChips();$('#allowRepeat').checked=settings.allowRepeat;$('#status').textContent='';show('setup')};
+$('#goStats').onclick=()=>{renderStats();show('stats')};
+$('#goData').onclick=()=>{renderData();show('data')};
+
+/* ============ 挑戰設定 ============ */
+function renderChips(){
+  const box=$('#regionChips');box.innerHTML='';
+  for(const [c,l] of REGIONS){
+    const b=document.createElement('button');b.className='chip'+(settings.regions.includes(c)?' sel':'');b.textContent=l;
+    b.onclick=()=>{const i=settings.regions.indexOf(c);i<0?settings.regions.push(c):settings.regions.splice(i,1);b.classList.toggle('sel');if(c==='InterCity')renderIc()};
+    box.appendChild(b);
+  }
+  renderIc();
+}
+async function renderIc(){
+  const has=settings.regions.includes('InterCity');
+  $('#icBox').style.display=has?'block':'none';
+  if(!has)return;
+  const box=$('#icChips');
+  if(!icRoutes){
+    box.innerHTML='<span class="hint">載入公路客運路線中…</span>';
+    try{icRoutes=await loadRegion('InterCity',t=>box.innerHTML='<span class="hint">'+t+'</span>')}
+    catch(e){box.innerHTML='<span class="hint">⚠ '+e.message+'</span>';return}
+  }
+  const cnt={};icRoutes.forEach(r=>{const g=icGroup(r.name);cnt[g]=(cnt[g]||0)+1});
+  settings.icGroups=settings.icGroups.filter(g=>cnt[g]);
+  box.innerHTML='';
+  const mk=(label,sel,fn)=>{const b=document.createElement('button');b.className='chip'+(sel?' sel':'');b.textContent=label;b.onclick=fn;box.appendChild(b)};
+  const save=()=>{LS.set('settings',settings);renderIc()};
+  mk('全部',!settings.icGroups.length,()=>{settings.icGroups=[];save()});
+  Object.keys(cnt).sort(icSort).forEach(g=>mk(g+' ('+cnt[g]+')',settings.icGroups.includes(g),()=>{
+    const i=settings.icGroups.indexOf(g);i<0?settings.icGroups.push(g):settings.icGroups.splice(i,1);save();
+  }));
+}
+async function loadPool(regions,status){
+  pool={};
+  for(const c of regions){pool[c]=await loadRegion(c,status)}
+}
+async function startChallenge(){
+  if(!settings.regions.length){$('#status').textContent='請至少選擇一個地區';return}
+  settings.allowRepeat=$('#allowRepeat').checked;LS.set('settings',settings);
+  sessionDone=new Set();rt=null;
+  const btn=$('#doStart');btn.disabled=true;
+  try{
+    await loadPool(settings.regions,t=>$('#status').textContent=t);
+    $('#status').textContent='';
+    if(!nextRandom()){$('#status').textContent='所選條件下已沒有未出過的題目了。可勾選「允許重複」或清除出題紀錄。'}
+  }catch(e){$('#status').textContent='⚠ '+e.message}
+  btn.disabled=false;
+}
+$('#doStart').onclick=startChallenge;
+
+let sessionDone=new Set(),rt=null; // rt:戰績頁「範圍重新測驗」進行中的狀態
+const regionLabel=c=>(c==='InterCity'&&settings.icGroups.length)?'公路客運('+settings.icGroups.join('、')+')':(RLABEL[c]||c);
+function filterList(c,list){
+  return(c==='InterCity'&&settings.icGroups.length)?list.filter(r=>settings.icGroups.includes(icGroup(r.name))):list;
+}
+function showCongrats(title,names,note,btn,more,mode){
+  clearInterval(tick);
+  $('#cgTitle').textContent=title;$('#cgNames').textContent=names;$('#cgNote').innerHTML=note;
+  const b=$('#cgOk');b.textContent=btn;b.dataset.more=more?'1':'';b.dataset.mode=mode||'';
+  $('#congrats').classList.add('on');
+}
+function nextRandom(){
+  const a=asked(),cand=[],finished=[];
+  for(const c of settings.regions){
+    if(sessionDone.has(c))continue;
+    const list=filterList(c,pool[c]||[]);
+    const rem=settings.allowRepeat?list:list.filter(r=>!a[c+'|'+r.id]);
+    if(!rem.length){if(!settings.allowRepeat&&list.length)finished.push({c,list});continue}
+    cand.push(...rem);
+  }
+  if(finished.length){ // 該範圍題目全部出完:恭喜並清除該範圍的出題紀錄
+    const a2=asked();
+    finished.forEach(f=>{f.list.forEach(r=>delete a2[f.c+'|'+r.id]);sessionDone.add(f.c)});
+    LS.set('asked',a2);
+    showCongrats('恭喜你已完成',finished.map(f=>regionLabel(f.c)).join('、'),'該地區的出題紀錄已重置,可重新挑戰。<br>戰績仍會保留。',cand.length?'繼續挑戰':'返回主頁',cand.length>0,'');
+    return 'congrats';
+  }
+  if(!cand.length)return false;
+  askQuestion(cand[Math.floor(Math.random()*cand.length)]);return true;
+}
+$('#cgOk').onclick=()=>{
+  const b=$('#cgOk');
+  $('#congrats').classList.remove('on');
+  if(b.dataset.more){nextRandom();return}
+  if(b.dataset.mode==='retest'){rt=null;stack.length=0;stack.push('home','stats');renderStats();show('stats',false);return}
+  stack.length=0;stack.push('home');show('home',false);
+};
+
+/* ============ 作答 ============ */
+function ensureMap(){
+  if(map)return;
+  map=L.map('map',{zoomControl:true,attributionControl:false,preferCanvas:true,maxZoom:16});
+  map.createPane('county').style.zIndex=350;           // 縣界:在路線下方
+  const lp=map.createPane('labels');lp.style.zIndex=450;lp.style.pointerEvents='none'; // 地名:在路線上方
+  map.setView([23.7,121],8);
+}
+// 底圖三段式:① 只有河流/地形(無道路、地名) → ② 加上道路與縣界 → ③ 加上地名(按鈕消失)
+const BASE_STEPS=['顯示河流底圖','加上道路與縣界','加上地名'];
+let stage=0,baseL=null,attrOn=false;
+function makeBase(){
+  const esri=(svc,o)=>L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/'+svc+'/MapServer/tile/{z}/{y}/{x}',Object.assign({attribution:'Tiles © Esri'},o));
+  const svg=L.svg({pane:'county'});
+  baseL=[
+    [esri('World_Terrain_Base',{maxNativeZoom:13,zIndex:1})],
+    [esri('Reference/World_Transportation',{maxNativeZoom:15,zIndex:2}),
+     L.layerGroup(COUNTY_ARCS.map(a=>L.polyline(a,{color:'#4a4a4a',weight:1.6,dashArray:'5 4',opacity:.85,pane:'county',renderer:svg,interactive:false})))],
+    [L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxNativeZoom:18,pane:'labels',attribution:'© OpenStreetMap © CARTO'})]
+  ];
+}
+function resetBase(){
+  if(baseL)baseL.flat().forEach(l=>{if(map.hasLayer(l))map.removeLayer(l)});
+  stage=0;
+  const b=$('#mapToggle');b.style.display='';b.textContent=BASE_STEPS[0];
+}
+function advanceBase(){
+  if(stage>=3)return;
+  if(!baseL)makeBase();
+  usedMap=true;
+  if(!attrOn){L.control.attribution({prefix:false}).addTo(map);attrOn=true}
+  baseL[stage].forEach(l=>l.addTo(map));
+  stage++;
+  const b=$('#mapToggle');
+  if(stage>=3)b.style.display='none';else b.textContent=BASE_STEPS[stage];
+}
+function askQuestion(route){
+  cur=route;usedMap=false;
+  const a=asked();a[route.region+'|'+route.id]=1;LS.set('asked',a);
+  show('quiz');ensureMap();resetBase();
+  if(lineLayer)map.removeLayer(lineLayer);
+  lineLayer=L.layerGroup(route.lines.map(l=>L.polyline(l,{color:'#d9480f',weight:4,opacity:.9,lineJoin:'round'}))).addTo(map);
+  const bounds=L.latLngBounds(route.lines.flat());
+  map.invalidateSize();map.fitBounds(bounds,{padding:[30,30]});
+  resetReveal();$('#ans').value='';$('#qmsg').textContent='';$('#qmsg').style.color='';$('#result').classList.remove('on');
+  t0=Date.now();clearInterval(tick);tick=setInterval(updTimer,250);updTimer();
+  setTimeout(()=>$('#ans').focus(),100);
+}
+const fmt=s=>{s=Math.round(s);const m=Math.floor(s/60);return(m<10?'0':'')+m+':'+(s%60<10?'0':'')+s%60};
+const fmtLong=s=>{const m=Math.floor(s/60),x=s%60;return m?m+' 分 '+x.toFixed(1)+' 秒':x.toFixed(1)+' 秒'};
+function updTimer(){$('#timer').textContent=fmt((Date.now()-t0)/1000)}
+$('#mapToggle').onclick=advanceBase;
+function resetReveal(){revealed=false;$('#revealBtn').textContent='顯示答案';$('#ans').disabled=false;$('#sendBtn').disabled=false}
+// 顯示答案(不計入戰績) → 按鈕變「下一題」 → 按下後出下一題,按鈕恢復為「顯示答案」
+$('#revealBtn').onclick=()=>{
+  if(!revealed){
+    revealed=true;clearInterval(tick);
+    const q=$('#qmsg');q.style.color='#2b8a3e';q.textContent='答案:'+cur.name+'(不計入戰績)';
+    $('#ans').disabled=true;$('#sendBtn').disabled=true;$('#revealBtn').textContent='下一題';
+  }else{
+    const r=rt?nextRetest():nextRandom();
+    if(!r){$('#qmsg').style.color='';$('#qmsg').textContent='沒有更多題目了'}
+  }
+};
+$('#quitBtn').onclick=()=>{
+  clearInterval(tick);const toStats=!!rt;rt=null;
+  stack.length=0;stack.push('home');
+  if(toStats){stack.push('stats');renderStats();show('stats',false)}else show('home',false);
+};
+$('#qform').onsubmit=e=>{
+  e.preventDefault();
+  const v=$('#ans').value;if(revealed||!v.trim())return;
+  if(isCorrect(v,cur)){
+    clearInterval(tick);
+    const secs=(Date.now()-t0)/1000;
+    const rec=records();
+    rec.push({id:cur.id,region:cur.region,name:cur.name,date:new Date().toISOString(),secs:+secs.toFixed(1),usedMap});
+    LS.set('records',rec);
+    $('#rName').textContent=cur.name;$('#rRegion').textContent=RLABEL[cur.region]||cur.region;
+    $('#rTime').textContent=fmtLong(secs);
+    const b=$('#rMap');b.textContent=usedMap?'有使用':'未使用';b.className='badge '+(usedMap?'b-yes':'b-no');
+    $('#result').classList.add('on');
+  }else{
+    $('#qmsg').textContent='不對喔,再想想~';
+    const i=$('#ans');i.classList.remove('shake');void i.offsetWidth;i.classList.add('shake');i.select();
+  }
+};
+$('#again').onclick=()=>{
+  $('#result').classList.remove('on');
+  if(rt){nextRetest();return}
+  if(!settings.regions.includes(cur.region))settings.regions=[cur.region];
+  loadPool(settings.regions).then(()=>{if(!nextRandom()){alert('已沒有未出過的題目,返回主頁');$('#toHome').click()}}).catch(e=>alert(e.message));
+};
+$('#toHome').onclick=()=>{$('#result').classList.remove('on');clearInterval(tick);stack.length=0;stack.push('home');show('home',false)};
+
+/* ============ 戰績 ============ */
+function renderStats(){
+  const rec=records(),a=asked();
+  const regs=[...new Set([...rec.map(r=>r.region),...Object.keys(a).map(k=>k.split('|')[0])])].filter(c=>RLABEL[c]);
+  [...statSel].forEach(c=>{if(!regs.includes(c))statSel.delete(c)});
+  const box=$('#statChips');box.innerHTML='';
+  const mk=(l,sel,fn)=>{const b=document.createElement('button');b.className='chip'+(sel?' sel':'');b.textContent=l;b.onclick=fn;box.appendChild(b)};
+  mk('全部',!statSel.size,()=>{statSel.clear();renderStats()});
+  regs.forEach(c=>mk(RLABEL[c],statSel.has(c),()=>{statSel.has(c)?statSel.delete(c):statSel.add(c);renderStats()}));
+  const list=rec.filter(r=>!statSel.size||statSel.has(r.region)).reverse();
+  const el=$('#recList');el.innerHTML='';
+  if(!list.length){el.innerHTML='<div class="empty">還沒有成功完成的紀錄</div>';return}
+  for(const r of list){
+    const d=document.createElement('div');d.className='rec';
+    const dt=new Date(r.date);
+    d.innerHTML='<div><span class="nm"></span><span class="rg"></span></div><button>重新測驗</button>'+
+      '<div class="meta"><span>'+dt.toLocaleDateString('zh-TW')+' '+dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})+'</span><span>⏱ '+fmtLong(r.secs)+'</span><span class="badge '+(r.usedMap?'b-yes':'b-no')+'">'+(r.usedMap?'有用底圖':'未用底圖')+'</span></div>';
+    d.querySelector('.nm').textContent=r.name;d.querySelector('.rg').textContent=RLABEL[r.region]||r.region;
+    d.querySelector('button').onclick=()=>retest(r);
+    el.appendChild(d);
+  }
+}
+// 範圍重新測驗:從「已出過」(出過題或已完成)的路線中,依所選縣市隨機出題,每題只出一次
+async function startRangeRetest(){
+  const rec=records(),a=asked();
+  const regs=new Set([...rec.map(r=>r.region),...Object.keys(a).map(k=>k.split('|')[0])]);
+  const use=[...regs].filter(c=>RLABEL[c]&&(!statSel.size||statSel.has(c)));
+  if(!use.length){alert('還沒有已出過的題目');return}
+  const btn=$('#retestRange');btn.disabled=true;
+  try{
+    const routes=[];
+    for(const c of use){
+      const list=await loadRegion(c);
+      const names=new Set(rec.filter(r=>r.region===c).map(r=>norm(r.name)));
+      for(const r of list)if(a[c+'|'+r.id]||names.has(norm(r.name)))routes.push(r);
+    }
+    if(!routes.length){alert('找不到對應的路線資料');return}
+    rt={routes,done:new Set(),regions:use};sessionDone=new Set();
+    nextRetest();
+  }catch(e){alert(e.message)}
+  finally{btn.disabled=false}
+}
+function nextRetest(){
+  const rem=rt.routes.filter(r=>!rt.done.has(r.region+'|'+r.id));
+  if(!rem.length){
+    showCongrats('恭喜你已重新測驗完',rt.regions.map(c=>RLABEL[c]||c).join('、'),'範圍內所有出過的路線都測驗完了。','返回戰績',false,'retest');
+    return 'congrats';
+  }
+  const r=rem[Math.floor(Math.random()*rem.length)];
+  rt.done.add(r.region+'|'+r.id);askQuestion(r);return true;
+}
+$('#retestRange').onclick=startRangeRetest;
+async function retest(r){
+  try{
+    const routes=await loadRegion(r.region);
+    const route=routes.find(x=>x.id===r.id||x.name===r.name);
+    if(!route){alert('找不到此路線資料(資料可能已更新)');return}
+    sessionDone=new Set();rt=null;
+    pool[r.region]=routes;
+    if(!settings.regions.includes(r.region))settings.regions=[r.region];
+    askQuestion(route);
+  }catch(e){alert(e.message)}
+}
+
+/* ============ 資料與設定 ============ */
+async function renderData(){
+  $('#cid').value=LS.get('cid','');$('#csec').value=LS.get('csec','');
+  $('#askedInfo').textContent='已出過 '+Object.keys(asked()).length+' 題;戰績 '+records().length+' 筆。清除時兩者一併刪除。';
+  const box=$('#cacheList');box.innerHTML='';
+  for(const [c,l] of REGIONS){
+    const v=await kvGet('region:'+c);
+    if(v){const d=document.createElement('div');d.className='hint';d.textContent='✓ '+l+':'+v.routes.length+' 條路線('+new Date(v.ts).toLocaleDateString('zh-TW')+')';box.appendChild(d)}
+  }
+  if(!box.children.length)box.innerHTML='<div class="hint">尚無快取</div>';
+}
+$('#saveKey').onclick=()=>{LS.set('cid',$('#cid').value.trim());LS.set('csec',$('#csec').value.trim());token=null;$('#dataMsg').textContent='已儲存金鑰'};
+$('#clearCache').onclick=async()=>{await kvClear();pool={};icRoutes=null;renderData();$('#dataMsg').textContent='已清除快取'};
+$('#clearAsked').onclick=()=>{
+  if(!confirm('確定要清除嗎?出題紀錄與戰績都會被刪除,無法復原。'))return;
+  LS.set('asked',{});LS.set('records',[]);renderData();$('#dataMsg').textContent='已清除出題紀錄與戰績';
+};
+$('#importBtn').onclick=()=>$('#importFile').click();
+$('#importFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    const j=JSON.parse(await f.text());let n=0;
+    for(const [c,routes] of Object.entries(j.regions||{})){
+      if(!RLABEL[c]||!Array.isArray(routes))continue;
+      await kvSet('region:'+c,{routes,ts:Date.now()});n++;
+    }
+    icRoutes=null;$('#dataMsg').textContent='已匯入 '+n+' 個地區';renderData();
+  }catch(err){$('#dataMsg').textContent='匯入失敗:'+err.message}
+  e.target.value='';
+};
+</script>
+</body>
+</html>
